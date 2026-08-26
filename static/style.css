@@ -14,6 +14,13 @@
 
 * { box-sizing: border-box; }
 
+/* The `hidden` attribute is only `display: none` in the UA stylesheet, so any
+   author-level `display` on the same element beats it and leaves the element
+   permanently visible. `.lightbox` sets `display: grid`, which did exactly
+   that: the overlay covered the whole page from load. Guard the whole class of
+   bug rather than patching one selector. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   background: var(--bg);
