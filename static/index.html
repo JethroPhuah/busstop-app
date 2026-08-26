@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Go JB?</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="bar-main">
+      <h1>Go JB?</h1>
+      <p class="sub">Live checkpoint cameras &middot; Woodlands vs Tuas</p>
+    </div>
+    <div class="bar-side">
+      <span id="clock" class="clock">&mdash;</span>
+      <button id="refresh" type="button" class="btn">Refresh</button>
+    </div>
+  </header>
+
+  <div id="warnings" class="warnings" hidden></div>
+
+  <main id="board" class="board">
+    <p class="loading">Loading camera feeds&hellip;</p>
+  </main>
+
+  <footer class="foot">
+    <p>
+      Camera frames and weather from
+      <a href="https://data.gov.sg" target="_blank" rel="noopener">data.gov.sg</a>
+      (LTA / NEA). Direction labels are burned into the frames by LTA.
+    </p>
+    <p class="muted">
+      This app shows you the queue &mdash; it does not score it. Judging a jam from
+      a photo is something you do better than an algorithm, especially at night.
+    </p>
+  </footer>
+
+  <div id="lightbox" class="lightbox" hidden>
+    <button class="lightbox-close" type="button" aria-label="Close">&times;</button>
+    <img id="lightbox-img" alt="">
+    <p id="lightbox-cap" class="lightbox-cap"></p>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

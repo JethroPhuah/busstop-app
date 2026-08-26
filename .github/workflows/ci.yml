@@ -15,18 +15,56 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build and test
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.11', '3.12']
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Byte-compile all sources
+        run: python -m compileall -q app.py checkpoints.py tests
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+  smoke:
+    name: Server smoke test
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Lint
-        run: echo "TODO - add lint command"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-      - name: Build
-        run: echo "TODO - add build command"
-
-      - name: Test
-        run: echo "TODO - add test command"
+      # Starts the real server and checks it serves the page and static assets.
+      # The data.gov.sg feeds are not exercised here, so CI stays hermetic and
+      # does not fail when an upstream API is having a bad day.
+      - name: Serve the page and fetch it
+        run: |
+          python app.py --port 8765 --no-open &
+          for i in $(seq 1 20); do
+            if curl -sf -o /dev/null http://127.0.0.1:8765/; then
+              echo "server up"
+              break
+            fi
+            sleep 1
+          done
+          curl -sf -o /dev/null http://127.0.0.1:8765/
+          curl -sf -o /dev/null http://127.0.0.1:8765/static/app.js
+          curl -sf -o /dev/null http://127.0.0.1:8765/static/style.css
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/img/9999)" = "404"
+          test "$(curl -s -o /dev/null -w '%{http_code}' --path-as-is http://127.0.0.1:8765/static/../app.py)" = "403"
+          echo "smoke test passed"
