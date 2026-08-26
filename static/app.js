@@ -253,8 +253,13 @@ function schedule() {
   }, REFRESH_MS);
 }
 
-document.getElementById("refresh").addEventListener("click", load);
-lightbox.querySelector(".lightbox-close").addEventListener("click", closeLightbox);
+// Optional chrome: the published shell has no Refresh button, and wiring a
+// missing element threw at the top level, which stopped load() ever running.
+const refreshBtn = document.getElementById("refresh");
+if (refreshBtn) refreshBtn.addEventListener("click", load);
+
+const lightboxClose = lightbox.querySelector(".lightbox-close");
+if (lightboxClose) lightboxClose.addEventListener("click", closeLightbox);
 lightbox.addEventListener("click", (e) => {
   if (e.target === lightbox) closeLightbox();
 });
