@@ -1,13 +1,15 @@
 """Local server for the Woodlands / Tuas checkpoint dashboard.
 
-Why a server at all, rather than a single HTML file opened from disk:
+Why a server rather than a single HTML file opened from disk. The JSON feeds do
+send `Access-Control-Allow-Origin: *`, so a static page could fetch those. The
+camera images, however, send no CORS headers at all. A browser will happily
+display them in an <img>, but reading their pixels through a canvas throws a
+security error - which rules out doing the congestion analysis client-side.
+Proxying the frames through this server makes them same-origin, and lets the
+analysis run here in Python where it is shared with the published snapshot.
 
-  * data.gov.sg sends no CORS headers, so browser JavaScript cannot fetch the
-    traffic-camera feed directly. The JSON has to be proxied.
-  * images.data.gov.sg returns 403 to requests without a User-Agent header,
-    so the image fetches have to be proxied too.
-
-Standard library only - no pip install required.
+Requires pillow and numpy for the frame analysis (see requirements.txt); the
+rest is standard library.
 """
 from __future__ import annotations
 
@@ -24,7 +26,10 @@ from urllib.error import URLError, HTTPError
 from urllib.parse import urlparse, parse_qs
 from urllib.request import Request, urlopen
 
+import baseline
 import checkpoints
+import jam
+import verdict
 
 TRAFFIC_URL = "https://api.data.gov.sg/v1/transport/traffic-images"
 RAINFALL_URL = "https://api-open.data.gov.sg/v2/real-time/api/rainfall"
@@ -34,6 +39,12 @@ FORECAST_URL = "https://api-open.data.gov.sg/v2/real-time/api/two-hr-forecast"
 USER_AGENT = "busstop-app/1.0 (local checkpoint dashboard)"
 
 STATIC_DIR = Path(__file__).parent / "static"
+# Baseline readings persist here so the verdict keeps its calibration between
+# runs instead of relearning from nothing every launch. The scheduled snapshot
+# commits this same file, so a fresh clone starts with whatever calibration the
+# published site has already accumulated. It is small text, unlike the frames,
+# which are rebuilt into the Pages artifact and never committed.
+HISTORY_PATH = Path(__file__).parent / "data" / "history.json"
 
 # The camera feed advances roughly once a minute; don't hammer it.
 FEED_TTL = 20.0
@@ -79,6 +90,8 @@ class Store:
         self._forecast = None
         # camera_id -> list of {"timestamp": iso, "bytes": jpeg}, oldest first
         self._images = {}
+        self._history = baseline.History.load(str(HISTORY_PATH))
+        self._last_sampled = None
 
     def refresh(self, force=False):
         """Refresh feeds if the TTL has expired, then pull any new frames."""
@@ -121,6 +134,9 @@ class Store:
                     shots.append({"timestamp": ts, "bytes": blob})
                     del shots[:-HISTORY_LIMIT]
 
+        if fetched:
+            self._record_baseline()
+
     def _plan_image_fetches(self, traffic):
         """Which camera frames are new since what we already hold."""
         if not traffic:
@@ -144,6 +160,46 @@ class Store:
                 plan[cam_id] = (cam.get("image"), ts)
         return plan
 
+    def measurements(self):
+        """Measure every analysed camera from the frames currently held."""
+        with self._lock:
+            held = {
+                cam_id: [(s["timestamp"], s["bytes"]) for s in shots]
+                for cam_id, shots in self._images.items()
+                if cam_id in jam.REGIONS
+            }
+        out = {}
+        for cam_id, shots in held.items():
+            frames = []
+            for ts, blob in shots:
+                parsed = checkpoints.parse_ts(ts)
+                if parsed is not None:
+                    frames.append((parsed.timestamp(), blob))
+            if frames:
+                out[cam_id] = jam.measure_camera(cam_id, frames)
+        return out
+
+    def _record_baseline(self):
+        """Append one round of occupancy readings, at most once a minute."""
+        now = datetime.now(timezone.utc)
+        if self._last_sampled and (now - self._last_sampled).total_seconds() < 60:
+            return
+        occ = verdict.occupancies(self.measurements())
+        if not any(v is not None for v in occ.values()):
+            return
+        with self._lock:
+            self._history.add(now, occ)
+            self._last_sampled = now
+            try:
+                HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+                self._history.save(str(HISTORY_PATH))
+            except OSError:
+                pass  # a read-only checkout must not break the page
+
+    def history(self):
+        with self._lock:
+            return self._history
+
     def state(self):
         with self._lock:
             traffic, rain, forecast = self._traffic, self._rain, self._forecast
@@ -152,7 +208,9 @@ class Store:
                 for cam_id, shots in self._images.items()
             }
         now = datetime.now(timezone.utc)
-        return checkpoints.build_state(traffic, rain, forecast, now, history)
+        state = checkpoints.build_state(traffic, rain, forecast, now, history)
+        state["directions"] = verdict.build(self.measurements(), self.history(), now)
+        return state
 
     def image(self, cam_id, ts=None):
         """Newest frame for a camera, or a specific historical one."""

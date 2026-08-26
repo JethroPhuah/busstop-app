@@ -2,7 +2,17 @@
 
 const REFRESH_MS = 30000;
 
+// Where the data comes from. The local server serves a live API and proxies
+// frames; the published snapshot serves committed JSON and committed JPEGs.
+// The page supplies this so both share one renderer.
+const CFG = Object.assign({
+  stateUrl: "/api/state",
+  frameUrl: (camId, ts) => "/img/" + camId + (ts ? "?ts=" + encodeURIComponent(ts) : ""),
+  live: true,
+}, window.APP_CONFIG || {});
+
 const board = document.getElementById("board");
+const verdictBox = document.getElementById("verdicts");
 const warnBox = document.getElementById("warnings");
 const clock = document.getElementById("clock");
 const lightbox = document.getElementById("lightbox");
@@ -110,7 +120,7 @@ function cameraCard(cam) {
 function shotFigure(cam, ts, label) {
   const fig = el("figure", "shot");
   const img = el("img");
-  img.src = "/img/" + cam.id + (ts ? "?ts=" + encodeURIComponent(ts) : "");
+  img.src = CFG.frameUrl(cam.id, ts);
   img.alt = cam.title + ", " + cam.detail;
   img.loading = "lazy";
   const caption = cam.title + " — " + label + " · " + timeOf(ts);
@@ -118,6 +128,52 @@ function shotFigure(cam, ts, label) {
   fig.appendChild(img);
   fig.appendChild(el("figcaption", null, label + " · " + timeOf(ts)));
   return fig;
+}
+
+const LEVEL_WORDS = {
+  clear: "quiet",
+  moderate: "normal",
+  heavy: "busy",
+  learning: "learning",
+  unknown: "no reading",
+};
+
+function verdictCard(direction) {
+  const rec = direction.recommendation || {};
+  const level = rec.level || "unknown";
+  const card = el("section", "verdict " + level);
+
+  card.appendChild(el("p", "verdict-dir", direction.label + " · " + direction.sub));
+  card.appendChild(el("p", "verdict-action", rec.action || "—"));
+  card.appendChild(el("p", "verdict-detail", rec.detail || ""));
+
+  if (rec.crossing_name) {
+    const via = el("p", "verdict-via");
+    via.append("via ");
+    via.appendChild(el("strong", null, rec.crossing_name));
+    if (rec.avoid && rec.avoid.crossing_name) {
+      via.append(" — " + rec.avoid.crossing_name + " is " +
+        (LEVEL_WORDS[rec.avoid.level] || rec.avoid.level));
+    }
+    card.appendChild(via);
+  }
+  if (rec.reason) card.appendChild(el("p", "verdict-why", rec.reason));
+
+  // Per-crossing breakdown, so the headline is always traceable.
+  const rows = el("div", "verdict-rows");
+  (direction.crossings || []).forEach((crossing) => {
+    const row = el("div", "verdict-row");
+    const left = el("span");
+    left.appendChild(el("span", "dot " + crossing.level));
+    left.append(crossing.name + " " + crossing.road);
+    row.appendChild(left);
+    row.appendChild(el("span", null, LEVEL_WORDS[crossing.level] || crossing.level));
+    row.title = crossing.reason || "";
+    rows.appendChild(row);
+  });
+  card.appendChild(rows);
+
+  return card;
 }
 
 function crossingPanel(crossing) {
@@ -156,6 +212,13 @@ function closeLightbox() {
 }
 
 function render(state) {
+  const directions = state.directions || [];
+  if (directions.length) {
+    verdictBox.replaceChildren(...directions.map(verdictCard));
+  } else {
+    verdictBox.replaceChildren(el("p", "loading", "No verdict available."));
+  }
+
   board.replaceChildren(...state.crossings.map(crossingPanel));
 
   if (state.warnings && state.warnings.length) {
@@ -170,17 +233,20 @@ function render(state) {
 
 async function load() {
   try {
-    const resp = await fetch("/api/state", { cache: "no-store" });
+    const resp = await fetch(CFG.stateUrl, { cache: "no-store" });
     if (!resp.ok) throw new Error("HTTP " + resp.status);
     render(await resp.json());
   } catch (err) {
     warnBox.replaceChildren(el("p", null,
-      "Could not reach the local server (" + err.message + "). Is app.py still running?"));
+      CFG.live
+        ? "Could not reach the local server (" + err.message + "). Is app.py still running?"
+        : "Could not load the published snapshot (" + err.message + ")."));
     warnBox.hidden = false;
   }
 }
 
 function schedule() {
+  if (!CFG.live) return;
   if (timer) clearInterval(timer);
   timer = setInterval(() => {
     if (!document.hidden) load();

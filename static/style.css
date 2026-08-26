@@ -307,3 +307,93 @@ body {
   .board { grid-template-columns: 1fr; padding: 12px; }
   .shots.compare { grid-template-columns: 1fr; }
 }
+
+/* ---------- verdicts (the call to action) ---------- */
+
+.verdicts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px;
+  padding: 18px 20px 4px;
+}
+
+.verdict {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--line);
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+
+.verdict.clear { border-left-color: var(--fresh); }
+.verdict.moderate { border-left-color: var(--aging); }
+.verdict.heavy { border-left-color: var(--stale); }
+.verdict.learning, .verdict.unknown { border-left-color: var(--muted); }
+
+.verdict-dir {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.verdict-action {
+  margin: 4px 0 0;
+  font-size: 25px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.verdict.clear .verdict-action { color: var(--fresh); }
+.verdict.moderate .verdict-action { color: var(--aging); }
+.verdict.heavy .verdict-action { color: var(--stale); }
+
+.verdict-detail { margin: 6px 0 0; font-size: 14px; }
+.verdict-via { margin: 10px 0 0; font-size: 13.5px; }
+.verdict-via strong { color: var(--text); }
+.verdict-why { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+
+.verdict-rows {
+  margin: 12px 0 0;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  display: grid;
+  gap: 5px;
+}
+
+.verdict-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 7px;
+  background: var(--muted);
+  flex: 0 0 8px;
+}
+
+.dot.clear { background: var(--fresh); }
+.dot.moderate { background: var(--aging); }
+.dot.heavy { background: var(--stale); }
+
+.board-heading {
+  margin: 22px 20px 0;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+@media (max-width: 520px) {
+  .verdicts { grid-template-columns: 1fr; padding: 12px; }
+  .verdict-action { font-size: 22px; }
+}

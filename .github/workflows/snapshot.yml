@@ -1,0 +1,84 @@
+name: Snapshot
+
+# Rebuilds the published page and grows the calibration baseline.
+#
+# GitHub's scheduled runners are rate limited and routinely delayed, so treat
+# the cadence below as "roughly every quarter hour" rather than a guarantee.
+# The page states its own build time so a late run is visible rather than
+# silently stale.
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'snapshot.py'
+      - 'jam.py'
+      - 'baseline.py'
+      - 'verdict.py'
+      - 'checkpoints.py'
+      - 'static/**'
+      - 'web/**'
+      - '.github/workflows/snapshot.yml'
+
+# Runs append to the same baseline file, so they must not overlap.
+concurrency:
+  group: snapshot
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build snapshot
+        run: python snapshot.py --out build
+
+      - name: Commit the updated baseline
+        run: |
+          if git diff --quiet -- data/history.json; then
+            echo "baseline unchanged"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/history.json
+          git commit -m "Update congestion baseline [skip ci]"
+          # Another run may have pushed while this one was building.
+          for attempt in 1 2 3; do
+            if git push; then
+              echo "pushed on attempt $attempt"
+              exit 0
+            fi
+            git pull --rebase --autostash origin main || true
+          done
+          echo "could not push the baseline; the snapshot itself still deploys"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

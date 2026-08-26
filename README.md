@@ -26,19 +26,72 @@ So this app does three things:
 3. **Keeps recent frames** so you can see whether the queue is building or
    clearing, rather than guessing from one snapshot.
 
-## What it deliberately does not do
+## The call to action
 
-It does not score the jam or tell you to go. Judging congestion from a traffic
-photo is something you do better than a heuristic — especially at night, when
-the camera view is mostly headlights. Inventing a "congestion: 7/10" number
-from these images would look authoritative and be wrong. The app's job is to
-put the right evidence in front of you fast.
+The top of the page answers the two questions directly, one card each:
 
-## Run it
+* **To Johor** — go now, go expecting traffic, or wait; and which crossing.
+* **To Singapore** — the same, for coming home.
 
-Python 3.8 or newer. No dependencies — standard library only.
+Each card names the crossing to use, the one to avoid, and why. Below it sits the
+per-crossing breakdown and the frames themselves, so the headline is always
+traceable to a picture you can check.
+
+### How the verdict is reached, and why it is not a threshold
+
+Congestion is measured per carriageway, not per camera. Each direction has a
+polygon drawn down the middle of its own lane, so "towards the Causeway" and
+"towards BKE" are scored separately instead of being averaged into one useless
+number for the whole frame.
+
+The measure is the fraction of that strip departing from the road surface —
+roughly, how much metal is sitting on the tarmac. That number is **not**
+comparable between cameras. Every region carries a constant contribution from
+whatever fixed clutter is in it: lamp posts, guard rails, fences, lane paint,
+tree shadows. Measured on real frames, an empty Tuas carriageway scored 0.390
+while a dense stationary queue on the Causeway scored 0.363 — the empty road
+looked busier. An absolute threshold cannot work.
+
+So each region is scored against **its own history** instead, because the lamp
+post is in every one of those readings too and cancels out. The question becomes
+"is this high for this region at this time of week", which history can answer,
+rather than "is 0.36 busy", which it cannot. Comparison prefers readings from a
+similar hour and day type, so rush hour is judged against rush hour, falling
+back to all hours when there are not yet enough.
+
+Until a region has enough readings it reports **learning** rather than guessing.
+That is the honest state on a fresh clone, and it resolves itself as the
+scheduled snapshot accumulates history.
+
+### What it still will not do
+
+It will not claim a verdict on a dark frame. After sunset these cameras are
+mostly headlights and the measure means nothing, so it says so instead.
+
+## Published page
+
+<https://jethrophuah.github.io/busstop-app/>
+
+A snapshot rebuilt on a schedule, showing the verdict beside the exact frames it
+was computed from. It lags real time by roughly ten to twenty minutes, because
+GitHub's scheduled runners are rate limited and routinely late; the page states
+its own build time so a stale run is visible rather than hidden.
+
+It is a snapshot rather than a live page for a concrete reason. The JSON feeds
+send `Access-Control-Allow-Origin: *`, so a static page can fetch those. The
+camera images send no CORS headers at all, so while a browser will happily
+display them, reading their pixels through a canvas throws a security error. A
+static page therefore cannot analyse the frames. The scheduled job does the
+analysis server-side and publishes the result.
+
+For a live read, run it locally.
+
+## Run it locally
+
+Python 3.8 or newer, plus pillow and numpy for the frame analysis.
 
 ```
+pip install -r requirements.txt
 python app.py
 ```
 
@@ -81,14 +134,19 @@ browser  ->  app.py  ->  api.data.gov.sg      (camera list + weather, JSON)
                      ->  images.data.gov.sg   (the JPEG frames)
 ```
 
-`app.py` is a proxy as well as a static file server, for two reasons found by
+`app.py` is a proxy as well as a static file server, for reasons found by
 testing the endpoints directly:
 
-* data.gov.sg sends **no CORS headers**, so browser JavaScript cannot fetch the
-  camera feed itself.
-* `images.data.gov.sg` returns **HTTP 403 without a `User-Agent` header**, and
-  serves the JPEGs as `application/octet-stream`, which the proxy relabels as
-  `image/jpeg` so the browser renders them.
+* The **camera images send no CORS headers**, so their pixels cannot be read
+  from a canvas. Proxying them makes them same-origin and lets the analysis run
+  in Python, shared with the published snapshot.
+* `images.data.gov.sg` **rejects some User-Agent strings with HTTP 403** —
+  including urllib's default — and serves the JPEGs as
+  `application/octet-stream`, which the proxy relabels as `image/jpeg` so the
+  browser renders them.
+* The JSON feeds *do* send `Access-Control-Allow-Origin: *`. Those headers only
+  appear when a request carries an `Origin`, which is why a plain `curl -I`
+  makes it look as though they are missing.
 
 The camera feed publishes a new frame set roughly every 20 seconds, about 23
 seconds behind real time, so frames under three minutes old are labelled fresh.
@@ -103,20 +161,41 @@ feed drops.
 
 | Path | What it is |
 | --- | --- |
-| `app.py` | Local HTTP server, feed caching, image proxy and history |
-| `checkpoints.py` | Pure logic: camera catalogue, nearest-station matching, freshness, payload shaping |
-| `static/` | The page — `index.html`, `style.css`, `app.js` |
-| `tests/` | Offline unit tests over `checkpoints.py` |
+| `app.py` | Local HTTP server, feed caching, image proxy and frame history |
+| `checkpoints.py` | Camera catalogue, nearest-station matching, freshness, payload shaping |
+| `jam.py` | Measurement only: direction polygons, masking, occupancy, motion |
+| `baseline.py` | Self-calibrating scoring against a region's own history |
+| `verdict.py` | Maps regions onto routes and words the call to action |
+| `snapshot.py` | Builds the published site into `build/` and grows the baseline |
+| `static/` | The local page — `index.html`, `style.css`, `app.js` |
+| `web/index.html` | The published page's shell; shares the same JS and CSS |
+| `data/history.json` | The committed baseline, appended to by each snapshot run |
+| `tools/` | `roi_preview.py` draws the regions; `calibrate.py` prints raw measures |
+| `tests/` | Offline unit tests, no network |
 
-`checkpoints.py` holds no network code so the whole data-shaping layer is
-testable offline. Fixtures in the tests are trimmed from real API responses, so
-the field names under test match the live feeds.
+`checkpoints.py` holds no network code and `jam.py` holds no thresholds: it
+measures, and `baseline.py` judges. Both splits are what make the logic testable
+offline. Fixtures in the tests are trimmed from real API responses, so the field
+names under test match the live feeds.
+
+### Checking the regions
+
+The verdict is only as good as the polygons, and one covering the wrong
+carriageway gives a confident wrong answer. After changing `jam.REGIONS`, render
+them over live frames and actually look:
+
+```
+python tools/roi_preview.py roi-preview
+```
 
 ```
 python -m unittest discover -s tests -v
 ```
 
-CI runs the same suite on every push and pull request.
+CI runs the same suite on every push and pull request, on Python 3.9, 3.11 and
+3.12, plus a server smoke test. The tests cover the scoring rules, the region
+geometry (including that opposing directions never overlap), degraded feeds, and
+two browser-only mistakes that Python tests miss.
 
 ## Data sources
 

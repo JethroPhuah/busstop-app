@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Go JB?</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="bar">
@@ -14,7 +14,7 @@
     </div>
     <div class="bar-side">
       <span id="clock" class="clock">&mdash;</span>
-      <button id="refresh" type="button" class="btn">Refresh</button>
+      <a class="btn" href="https://github.com/JethroPhuah/busstop-app">Source</a>
     </div>
   </header>
 
@@ -41,6 +41,11 @@
       an absolute threshold &mdash; a lamp post in frame would otherwise read as
       traffic. Until enough readings exist it says so rather than guessing.
     </p>
+    <p class="muted">
+      This page is a snapshot rebuilt on a schedule, so it lags real time by
+      roughly ten to twenty minutes. The frames shown are the exact ones the
+      verdict was computed from. For a live read, run the app locally.
+    </p>
   </footer>
 
   <div id="lightbox" class="lightbox" hidden>
@@ -50,12 +55,14 @@
   </div>
 
   <script>
+    // Static snapshot: one committed frame per camera, refreshed by a
+    // scheduled GitHub Action. Nothing to poll, so live is false.
     window.APP_CONFIG = {
-      stateUrl: "/api/state",
-      frameUrl: (camId, ts) => "/img/" + camId + (ts ? "?ts=" + encodeURIComponent(ts) : ""),
-      live: true,
+      stateUrl: "data/state.json",
+      frameUrl: (camId) => "frames/" + camId + ".jpg",
+      live: false,
     };
   </script>
-  <script src="/static/app.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>

@@ -1,0 +1,2 @@
+-r requirements.txt
+# Nothing extra yet; tools/ uses pillow from the runtime requirements.
